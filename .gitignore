@@ -64,4 +64,5 @@ scratch/
 template.ipynb
 
 .idea/
-.site/
+site/
+.obsidian/

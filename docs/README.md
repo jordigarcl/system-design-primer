@@ -1,4 +1,4 @@
-# System Design Interview Primer
+# System Design Primer
 System design is a broad topic. There is a vast amount of resources scattered throughout the web on system design principles. This repo is an **organized collection** of resources to help you learn how to build systems at scale.
 
 ## Motivation
@@ -279,7 +279,7 @@ There are two complementary patterns to support high availability: **fail-over**
 - Fail-over
 - Replication
 
-### Fail-over
+#### Fail-over
 **Active-passive fail-over** 
 
 In **active-passive fail-over** (AKA master-slave fail-over), heartbeats are sent between the active and the passive server on standby. If the heartbeat is interrupted, the passive server takes over the active's IP address and resumes service.
@@ -297,7 +297,7 @@ If the servers are public-facing, the DNS would need to know about the public IP
 * Fail-over adds more hardware and additional complexity.
 * There is a potential for loss of data if the active system fails before any newly written data can be replicated to the passive.
 
-### Replication
+#### Replication
 This topic is further discussed in the [Database](#database) section:
 
 * [Master-slave replication](#master-slave-replication)
