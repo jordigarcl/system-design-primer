@@ -62,3 +62,5 @@ scratch/
 
 # IPython Notebook templates
 template.ipynb
+
+.idea/
