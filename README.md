@@ -14,9 +14,9 @@ Learning how to design scalable systems will help you become a better engineer.
 
 -----------
 ## Index
-1. Interview Prep
-2. System Design Topics
-3. Appendix
+1. [Interview Prep](#1-interview-prep)
+2. [System Design Topics](#2-system-design-topics)
+3. [Appendix](#3-appendix)
 -----
 
 ## 1. Interview Prep
