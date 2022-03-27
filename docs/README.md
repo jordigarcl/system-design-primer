@@ -70,6 +70,7 @@ You might be asked to do some estimates by hand. Refer to the [Appendix](#) for 
 - Discuss assumptions.
 
 Examples:
+
 * Who is going to use it?
 * How are they going to use it?
 * How many users are there?
