@@ -1,3 +1,10 @@
 site_name: "System Design Primer"
 theme:
   name: material
+  features:
+    - navigation.instant
+    - navigation.sections
+nav:
+    - 'Overview': 'index.md'
+    - 'Interview Prep': 'interview-prep.md'
+    - 'System Design Topics': 'system-design-topics.md'
