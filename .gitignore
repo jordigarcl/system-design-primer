@@ -64,3 +64,4 @@ scratch/
 template.ipynb
 
 .idea/
+.site/
