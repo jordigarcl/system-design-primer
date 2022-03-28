@@ -8,6 +8,7 @@ nav:
     - 'Overview': 'index.md'
     - 'Interview Prep': 'interview-prep.md'
     - 'System Design Topics': 'system-design-topics.md'
+    - 'Appendix': 'appendix.md'
 markdown_extensions:
     - toc:
         permalink: true
