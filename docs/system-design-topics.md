@@ -780,3 +780,459 @@ Sample data well-suited for NoSQL:
 * [Scaling up to your first 10 million users](https://www.youtube.com/watch?v=kKjm4ehYiMs)
 * [SQL vs NoSQL differences](https://www.sitepoint.com/sql-vs-nosql-differences/)
 
+## Cache
+
+<p align="center">
+  <img src="/images/Q6z24La.png">
+  <br/>
+  <i><a href=http://horicky.blogspot.com/2010/10/scalable-system-design-patterns.html>Source: Scalable system design patterns</a></i>
+</p>
+
+Caching improves page load times and can reduce the load on your servers and databases.  In this model, the dispatcher will first lookup if the request has been made before and try to find the previous result to return, in order to save the actual execution.
+
+Databases often benefit from a uniform distribution of reads and writes across its partitions.  Popular items can skew the distribution, causing bottlenecks.  Putting a cache in front of a database can help absorb uneven loads and spikes in traffic.
+
+Types of caches:
+- Client caching
+- CDN caching
+- Web server caching
+- Database caching
+- Application caching
+- Caching at the database query level
+- Caching at the object level
+- When to update the cache
+
+### Client caching
+
+Caches can be located on the client side (OS or browser), [server side](#reverse-proxy-web-server), or in a distinct cache layer.
+
+### CDN caching
+
+[CDNs](#content-delivery-network) are considered a type of cache.
+
+### Web server caching
+
+[Reverse proxies](#reverse-proxy-web-server) and caches such as [Varnish](https://www.varnish-cache.org/) can serve static and dynamic content directly.  Web servers can also cache requests, returning responses without having to contact application servers.
+
+### Database caching
+
+Your database usually includes some level of caching in a default configuration, optimized for a generic use case.  Tweaking these settings for specific usage patterns can further boost performance.
+
+### Application caching
+
+In-memory caches such as Memcached and Redis are key-value stores between your application and your data storage.  Since the data is held in RAM, it is much faster than typical databases where data is stored on disk.  RAM is more limited than disk, so [cache invalidation](https://en.wikipedia.org/wiki/Cache_algorithms) algorithms such as [least recently used (LRU)](https://en.wikipedia.org/wiki/Cache_replacement_policies#Least_recently_used_(LRU)) can help invalidate 'cold' entries and keep 'hot' data in RAM.
+
+There are multiple levels you can cache that fall into two general categories: 
+
+- **Caching at the database query level** 
+- **Caching at the object level**
+
+Generally, you should try to avoid file-based caching, as it makes cloning and auto-scaling more difficult.
+
+**Caching at the database query level**
+
+Whenever you query the database, hash the query as a key and store the result to the cache.  This approach suffers from expiration issues:
+
+* Hard to delete a cached result with complex queries
+* If one piece of data changes such as a table cell, you need to delete all cached queries that might include the changed cell
+
+**Caching at the object level**
+
+See your data as an object, similar to what you do with your application code.  Have your application assemble the dataset from the database into a class instance or a data structure(s):
+
+* Remove the object from cache if its underlying data has changed
+* Allows for asynchronous processing: workers assemble objects by consuming the latest cached object
+
+Suggestions of what to cache:
+
+* User sessions
+* Fully rendered web pages
+* Activity streams
+* User graph data
+
+### Caching strategies
+
+Since you can only store a limited amount of data in cache, you'll need to determine which cache update strategy works best for your use case.
+
+We'll discuss the following caching strategies:
+
+- **Cache-aside**
+- **Write-through**
+- **Write-behind**
+- **Refresh-ahead**
+
+#### Cache-aside
+
+<p align="center">
+  <img src="/images/ONjORqk.png">
+  <br/>
+  <i><a href=http://www.slideshare.net/tmatyashovsky/from-cache-to-in-memory-data-grid-introduction-to-hazelcast>Source: From cache to in-memory data grid</a></i>
+</p>
+
+The application is responsible for reading and writing from storage.  The cache does not interact with storage directly.  The application does the following:
+
+* Look for entry in cache, resulting in a cache miss
+* Load entry from the database
+* Add entry to cache
+* Return entry
+
+```python
+def get_user(self, user_id):
+    user = cache.get("user.{0}", user_id)
+    if user is None:
+        user = db.query("SELECT * FROM users WHERE user_id = {0}", user_id)
+        if user is not None:
+            key = "user.{0}".format(user_id)
+            cache.set(key, json.dumps(user))
+    return user
+```
+
+[Memcached](https://memcached.org/) is generally used in this manner.
+
+Subsequent reads of data added to cache are fast.  Cache-aside is also referred to as lazy loading.  Only requested data is cached, which avoids filling up the cache with data that isn't requested.
+
+Disadvantages of cache-aside:
+
+* Each cache miss results in three trips, which can cause a noticeable delay.
+* Data can become stale if it is updated in the database.  This issue is mitigated by setting a time-to-live (TTL) which forces an update of the cache entry, or by using write-through.
+* When a node fails, it is replaced by a new, empty node, increasing latency.
+
+#### Write-through
+
+<p align="center">
+  <img src="/images/0vBc0hN.png">
+  <br/>
+  <i><a href=http://www.slideshare.net/jboner/scalability-availability-stability-patterns/>Source: Scalability, availability, stability, patterns</a></i>
+</p>
+
+The application uses the cache as the main data store, reading and writing data to it, while the cache is responsible for reading and writing to the database:
+
+* Application adds/updates entry in cache
+* Cache synchronously writes entry to data store
+* Return
+
+Application code:
+
+```python
+set_user(12345, {"foo":"bar"})
+```
+
+Cache code:
+
+```python
+def set_user(user_id, values):
+    user = db.query("UPDATE Users WHERE id = {0}", user_id, values)
+    cache.set(user_id, user)
+```
+
+Write-through is a slow overall operation due to the write operation, but subsequent reads of just written data are fast.  Users are generally more tolerant of latency when updating data than reading data.  Data in the cache is not stale.
+
+Disadvantages of write through
+
+* When a new node is created due to failure or scaling, the new node will not cache entries until the entry is updated in the database.  Cache-aside in conjunction with write through can mitigate this issue.
+* Most data written might never be read, which can be minimized with a TTL.
+
+#### Write-behind (write-back)
+
+<p align="center">
+  <img src="/images/rgSrvjG.png">
+  <br/>
+  <i><a href=http://www.slideshare.net/jboner/scalability-availability-stability-patterns/>Source: Scalability, availability, stability, patterns</a></i>
+</p>
+
+In write-behind, the application does the following:
+
+* Add/update entry in cache
+* Asynchronously write entry to the data store, improving write performance
+
+Disadvantages of write-behind:
+
+* There could be data loss if the cache goes down prior to its contents hitting the data store.
+* It is more complex to implement write-behind than it is to implement cache-aside or write-through.
+
+#### Refresh-ahead
+
+<p align="center">
+  <img src="/images/kxtjqgE.png">
+  <br/>
+  <i><a href=http://www.slideshare.net/tmatyashovsky/from-cache-to-in-memory-data-grid-introduction-to-hazelcast>Source: From cache to in-memory data grid</a></i>
+</p>
+
+You can configure the cache to automatically refresh any recently accessed cache entry prior to its expiration.
+
+Refresh-ahead can result in reduced latency vs read-through if the cache can accurately predict which items are likely to be needed in the future.
+
+Disadvantages of refresh-ahead:
+
+* Not accurately predicting which items are likely to be needed in the future can result in reduced performance than without refresh-ahead.
+
+**Disadvantages of cache**
+
+* Need to maintain consistency between caches and the source of truth such as the database through [cache invalidation](https://en.wikipedia.org/wiki/Cache_algorithms).
+* Cache invalidation is a difficult problem, there is additional complexity associated with when to update the cache.
+* Need to make application changes such as adding Redis or memcached.
+
+**Source(s) and further reading**
+
+* [From cache to in-memory data grid](http://www.slideshare.net/tmatyashovsky/from-cache-to-in-memory-data-grid-introduction-to-hazelcast)
+* [Scalable system design patterns](http://horicky.blogspot.com/2010/10/scalable-system-design-patterns.html)
+* [Introduction to architecting systems for scale](http://lethain.com/introduction-to-architecting-systems-for-scale/)
+* [Scalability, availability, stability, patterns](http://www.slideshare.net/jboner/scalability-availability-stability-patterns/)
+* [Scalability](http://www.lecloud.net/post/9246290032/scalability-for-dummies-part-3-cache)
+* [AWS ElastiCache strategies](http://docs.aws.amazon.com/AmazonElastiCache/latest/UserGuide/Strategies.html)
+* [Wikipedia](https://en.wikipedia.org/wiki/Cache_(computing))
+
+## Asynchronism
+
+<p align="center">
+  <img src="/images/54GYsSx.png">
+  <br/>
+  <i><a href=http://lethain.com/introduction-to-architecting-systems-for-scale/#platform_layer>Source: Intro to architecting systems for scale</a></i>
+</p>
+
+Asynchronous workflows help reduce request times for expensive operations that would otherwise be performed in-line.  They can also help by doing time-consuming work in advance, such as periodic aggregation of data.
+
+We'll discuss the following asychronism mechanisms:
+- Message queues
+- Task queues
+- Back pressure
+
+### Message queues
+
+Message queues receive, hold, and deliver messages.  If an operation is too slow to perform inline, you can use a message queue with the following workflow:
+
+* An application publishes a job to the queue, then notifies the user of job status
+* A worker picks up the job from the queue, processes it, then signals the job is complete
+
+The user is not blocked and the job is processed in the background.  During this time, the client might optionally do a small amount of processing to make it seem like the task has completed.  For example, if posting a tweet, the tweet could be instantly posted to your timeline, but it could take some time before your tweet is actually delivered to all of your followers.
+
+**[Redis](https://redis.io/)** is useful as a simple message broker but messages can be lost.
+
+**[RabbitMQ](https://www.rabbitmq.com/)** is popular but requires you to adapt to the 'AMQP' protocol and manage your own nodes.
+
+**[Amazon SQS](https://aws.amazon.com/sqs/)** is hosted but can have high latency and has the possibility of messages being delivered twice.
+
+### Task queues
+
+Tasks queues receive tasks and their related data, runs them, then delivers their results.  They can support scheduling and can be used to run computationally-intensive jobs in the background.
+
+**[Celery](https://docs.celeryproject.org/en/stable/)** has support for scheduling and primarily has python support.
+
+### Back pressure
+
+If queues start to grow significantly, the queue size can become larger than memory, resulting in cache misses, disk reads, and even slower performance.  [Back pressure](http://mechanical-sympathy.blogspot.com/2012/05/apply-back-pressure-when-overloaded.html) can help by limiting the queue size, thereby maintaining a high throughput rate and good response times for jobs already in the queue.  Once the queue fills up, clients get a server busy or HTTP 503 status code to try again later.  Clients can retry the request at a later time, perhaps with [exponential backoff](https://en.wikipedia.org/wiki/Exponential_backoff).
+
+**Disadvantage(s): asynchronism**
+
+* Use cases such as inexpensive calculations and realtime workflows might be better suited for synchronous operations, as introducing queues can add delays and complexity.
+
+**Source(s) and further reading**
+
+* [It's all a numbers game](https://www.youtube.com/watch?v=1KRYH75wgy4)
+* [Applying back pressure when overloaded](http://mechanical-sympathy.blogspot.com/2012/05/apply-back-pressure-when-overloaded.html)
+* [Little's law](https://en.wikipedia.org/wiki/Little%27s_law)
+* [What is the difference between a message queue and a task queue?](https://www.quora.com/What-is-the-difference-between-a-message-queue-and-a-task-queue-Why-would-a-task-queue-require-a-message-broker-like-RabbitMQ-Redis-Celery-or-IronMQ-to-function)
+
+## Communication
+
+<p align="center">
+  <img src="/images/5KeocQs.jpg">
+  <br/>
+  <i><a href=http://www.escotal.com/osilayer.html>Source: OSI 7 layer model</a></i>
+</p>
+
+### Hyper-Text Transfer Protocol (HTTP)
+
+HTTP is a method for encoding and transporting data between a client and a server.  It is a request/response protocol: clients issue requests and servers issue responses with relevant content and completion status info about the request.  HTTP is self-contained, allowing requests and responses to flow through many intermediate routers and servers that perform load balancing, caching, encryption, and compression.
+
+A basic HTTP request consists of a verb (method) and a resource (endpoint).  Below are common HTTP verbs:
+
+| Verb | Description | Idempotent* | Safe | Cacheable |
+|---|---|---|---|---|
+| GET | Reads a resource | Yes | Yes | Yes |
+| POST | Creates a resource or trigger a process that handles data | No | No | Yes if response contains freshness info |
+| PUT | Creates or replace a resource | Yes | No | No |
+| PATCH | Partially updates a resource | No | No | Yes if response contains freshness info |
+| DELETE | Deletes a resource | Yes | No | No |
+
+*Can be called many times without different outcomes.
+
+HTTP is an application layer protocol relying on lower-level protocols such as **TCP** and **UDP**.
+
+**Source(s) and further reading: HTTP**
+
+* [What is HTTP?](https://www.nginx.com/resources/glossary/http/)
+* [Difference between HTTP and TCP](https://www.quora.com/What-is-the-difference-between-HTTP-protocol-and-TCP-protocol)
+* [Difference between PUT and PATCH](https://laracasts.com/discuss/channels/general-discussion/whats-the-differences-between-put-and-patch?page=1)
+
+### Transmission Control Protocol (TCP)
+
+<p align="center">
+  <img src="/images/JdAsdvG.jpg">
+  <br/>
+  <i><a href=http://www.wildbunny.co.uk/blog/2012/10/09/how-to-make-a-multi-player-game-part-1/>Source: How to make a multiplayer game</a></i>
+</p>
+
+TCP is a connection-oriented protocol over an [IP network](https://en.wikipedia.org/wiki/Internet_Protocol).  Connection is established and terminated using a [handshake](https://en.wikipedia.org/wiki/Handshaking).  All packets sent are guaranteed to reach the destination in the original order and without corruption through:
+
+* Sequence numbers and [checksum fields](https://en.wikipedia.org/wiki/Transmission_Control_Protocol#Checksum_computation) for each packet
+* [Acknowledgement](https://en.wikipedia.org/wiki/Acknowledgement_(data_networks)) packets and automatic retransmission
+
+If the sender does not receive a correct response, it will resend the packets.  If there are multiple timeouts, the connection is dropped.  TCP also implements [flow control](https://en.wikipedia.org/wiki/Flow_control_(data)) and [congestion control](https://en.wikipedia.org/wiki/Network_congestion#Congestion_control).  These guarantees cause delays and generally result in less efficient transmission than UDP.
+
+To ensure high throughput, web servers can keep a large number of TCP connections open, resulting in high memory usage.  It can be expensive to have a large number of open connections between web server threads and say, a [memcached](https://memcached.org/) server.  [Connection pooling](https://en.wikipedia.org/wiki/Connection_pool) can help in addition to switching to UDP where applicable.
+
+TCP is useful for applications that require high reliability but are less time critical.  Some examples include web servers, database info, SMTP, FTP, and SSH.
+
+Use TCP over UDP when:
+
+* You need all of the data to arrive intact
+* You want to automatically make a best estimate use of the network throughput
+
+### User Datagram Protocol (UDP)
+
+<p align="center">
+  <img src="images/yzDrJtA.jpg">
+  <br/>
+  <i><a href=http://www.wildbunny.co.uk/blog/2012/10/09/how-to-make-a-multi-player-game-part-1/>Source: How to make a multiplayer game</a></i>
+</p>
+
+UDP is connectionless.  Datagrams (analogous to packets) are guaranteed only at the datagram level.  Datagrams might reach their destination out of order or not at all.  UDP does not support congestion control.  Without the guarantees that TCP support, UDP is generally more efficient.
+
+UDP can broadcast, sending datagrams to all devices on the subnet.  This is useful with [DHCP](https://en.wikipedia.org/wiki/Dynamic_Host_Configuration_Protocol) because the client has not yet received an IP address, thus preventing a way for TCP to stream without the IP address.
+
+UDP is less reliable but works well in real time use cases such as VoIP, video chat, streaming, and realtime multiplayer games.
+
+Use UDP over TCP when:
+
+* You need the lowest latency
+* Late data is worse than loss of data
+* You want to implement your own error correction
+
+**Source(s) and further reading: TCP and UDP**
+
+* [Networking for game programming](http://gafferongames.com/networking-for-game-programmers/udp-vs-tcp/)
+* [Key differences between TCP and UDP protocols](http://www.cyberciti.biz/faq/key-differences-between-tcp-and-udp-protocols/)
+* [Difference between TCP and UDP](http://stackoverflow.com/questions/5970383/difference-between-tcp-and-udp)
+* [Transmission control protocol](https://en.wikipedia.org/wiki/Transmission_Control_Protocol)
+* [User datagram protocol](https://en.wikipedia.org/wiki/User_Datagram_Protocol)
+* [Scaling memcache at Facebook](http://www.cs.bu.edu/~jappavoo/jappavoo.github.com/451/papers/memcache-fb.pdf)
+
+### Remote Procedure Call (RPC)
+
+<p align="center">
+  <img src="images/iF4Mkb5.png">
+  <br/>
+  <i><a href=http://www.puncsky.com/blog/2016-02-13-crack-the-system-design-interview>Source: Crack the system design interview</a></i>
+</p>
+
+In an RPC, a client causes a procedure to execute on a different address space, usually a remote server.  The procedure is coded as if it were a local procedure call, abstracting away the details of how to communicate with the server from the client program.  Remote calls are usually slower and less reliable than local calls so it is helpful to distinguish RPC calls from local calls.  Popular RPC frameworks include [Protobuf](https://developers.google.com/protocol-buffers/), [Thrift](https://thrift.apache.org/), and [Avro](https://avro.apache.org/docs/current/).
+
+RPC is a request-response protocol:
+
+* **Client program** - Calls the client stub procedure.  The parameters are pushed onto the stack like a local procedure call.
+* **Client stub procedure** - Marshals (packs) procedure id and arguments into a request message.
+* **Client communication module** - OS sends the message from the client to the server.
+* **Server communication module** - OS passes the incoming packets to the server stub procedure.
+* **Server stub procedure** -  Unmarshalls the results, calls the server procedure matching the procedure id and passes the given arguments.
+* The server response repeats the steps above in reverse order.
+
+Sample RPC calls:
+
+```
+GET /someoperation?data=anId
+
+POST /anotheroperation
+{
+  "data":"anId";
+  "anotherdata": "another value"
+}
+```
+
+RPC is focused on exposing behaviors.  RPCs are often used for performance reasons with internal communications, as you can hand-craft native calls to better fit your use cases.
+
+Choose a native library (aka SDK) when:
+
+* You know your target platform.
+* You want to control how your "logic" is accessed.
+* You want to control how error control happens off your library.
+* Performance and end user experience is your primary concern.
+
+HTTP APIs following **REST** tend to be used more often for public APIs.
+
+**Disadvantages of RPC**
+
+* RPC clients become tightly coupled to the service implementation.
+* A new API must be defined for every new operation or use case.
+* It can be difficult to debug RPC.
+* You might not be able to leverage existing technologies out of the box.  For example, it might require additional effort to ensure [RPC calls are properly cached](http://etherealbits.com/2012/12/debunking-the-myths-of-rpc-rest/) on caching servers such as [Squid](http://www.squid-cache.org/).
+
+### Representational State Transfer (REST)
+
+REST is an architectural style enforcing a client/server model where the client acts on a set of resources managed by the server.  The server provides a representation of resources and actions that can either manipulate or get a new representation of resources.  All communication must be stateless and cacheable.
+
+There are four qualities of a RESTful interface:
+
+* **Identify resources (URI in HTTP)** - use the same URI regardless of any operation.
+* **Change with representations (Verbs in HTTP)** - use verbs, headers, and body.
+* **Self-descriptive error message (status response in HTTP)** - Use status codes, don't reinvent the wheel.
+* **[HATEOAS](http://restcookbook.com/Basics/hateoas/) (HTML interface for HTTP)** - your web service should be fully accessible in a browser.
+
+Sample REST calls:
+
+```
+GET /someresources/anId
+
+PUT /someresources/anId
+{"anotherdata": "another value"}
+```
+
+REST is focused on exposing data.  It minimizes the coupling between client/server and is often used for public HTTP APIs.  REST uses a more generic and uniform method of exposing resources through URIs, [representation through headers](https://github.com/for-GET/know-your-http-well/blob/master/headers.md), and actions through verbs such as GET, POST, PUT, DELETE, and PATCH.  Being stateless, REST is great for horizontal scaling and partitioning.
+
+**Disadvantages of REST**
+
+* With REST being focused on exposing data, it might not be a good fit if resources are not naturally organized or accessed in a simple hierarchy.  For example, returning all updated records from the past hour matching a particular set of events is not easily expressed as a path.  With REST, it is likely to be implemented with a combination of URI path, query parameters, and possibly the request body.
+* REST typically relies on a few verbs (GET, POST, PUT, DELETE, and PATCH) which sometimes doesn't fit your use case.  For example, moving expired documents to the archive folder might not cleanly fit within these verbs.
+* Fetching complicated resources with nested hierarchies requires multiple round trips between the client and server to render single views, e.g. fetching content of a blog entry and the comments on that entry. For mobile applications operating in variable network conditions, these multiple roundtrips are highly undesirable.
+* Over time, more fields might be added to an API response and older clients will receive all new data fields, even those that they do not need, as a result, it bloats the payload size and leads to larger latencies.
+
+**RPC and REST calls comparison**
+
+| Operation | RPC | REST |
+|---|---|---|
+| Signup    | **POST** /signup | **POST** /persons |
+| Resign    | **POST** /resign<br/>{<br/>"personid": "1234"<br/>} | **DELETE** /persons/1234 |
+| Read a person | **GET** /readPerson?personid=1234 | **GET** /persons/1234 |
+| Read a person’s items list | **GET** /readUsersItemsList?personid=1234 | **GET** /persons/1234/items |
+| Add an item to a person’s items | **POST** /addItemToUsersItemsList<br/>{<br/>"personid": "1234";<br/>"itemid": "456"<br/>} | **POST** /persons/1234/items<br/>{<br/>"itemid": "456"<br/>} |
+| Update an item    | **POST** /modifyItem<br/>{<br/>"itemid": "456";<br/>"key": "value"<br/>} | **PUT** /items/456<br/>{<br/>"key": "value"<br/>} |
+| Delete an item | **POST** /removeItem<br/>{<br/>"itemid": "456"<br/>} | **DELETE** /items/456 |
+
+<p align="center">
+  <i><a href=https://apihandyman.io/do-you-really-know-why-you-prefer-rest-over-rpc/>Source: Do you really know why you prefer REST over RPC</a></i>
+</p>
+
+**Source(s) and further reading: REST and RPC**
+
+* [Do you really know why you prefer REST over RPC](https://apihandyman.io/do-you-really-know-why-you-prefer-rest-over-rpc/)
+* [When are RPC-ish approaches more appropriate than REST?](http://programmers.stackexchange.com/a/181186)
+* [REST vs JSON-RPC](http://stackoverflow.com/questions/15056878/rest-vs-json-rpc)
+* [Debunking the myths of RPC and REST](http://etherealbits.com/2012/12/debunking-the-myths-of-rpc-rest/)
+* [What are the drawbacks of using REST](https://www.quora.com/What-are-the-drawbacks-of-using-RESTful-APIs)
+* [Crack the system design interview](http://www.puncsky.com/blog/2016-02-13-crack-the-system-design-interview)
+* [Thrift](https://code.facebook.com/posts/1468950976659943/)
+* [Why REST for internal use and not RPC](http://arstechnica.com/civis/viewtopic.php?t=1190508)
+
+## Security
+Security is a broad topic.  Unless you have considerable experience, a security background, or are applying for a position that requires knowledge of security, you probably won't need to know more than the basics:
+
+* Encrypt in transit and at rest.
+* Sanitize all user inputs or any input parameters exposed to user to prevent [XSS](https://en.wikipedia.org/wiki/Cross-site_scripting) and [SQL injection](https://en.wikipedia.org/wiki/SQL_injection).
+* Use parameterized queries to prevent SQL injection.
+* Use the principle of [least privilege](https://en.wikipedia.org/wiki/Principle_of_least_privilege).
+
+**Source(s) and further reading**
+
+* [API security checklist](https://github.com/shieldfy/API-Security-Checklist)
+* [Security guide for developers](https://github.com/FallibleInc/security-guide-for-developers)
+* [OWASP top ten](https://www.owasp.org/index.php/OWASP_Top_Ten_Cheat_Sheet)
