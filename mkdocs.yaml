@@ -8,3 +8,9 @@ nav:
     - 'Overview': 'index.md'
     - 'Interview Prep': 'interview-prep.md'
     - 'System Design Topics': 'system-design-topics.md'
+markdown_extensions:
+    - toc:
+        permalink: true
+repo_url: https://github.com/jordigarcl/system-design-primer
+repo_name: jordigarcl/system-design-primer
+edit_uri: edit/master/docs/
