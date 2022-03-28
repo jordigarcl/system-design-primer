@@ -3,4 +3,4 @@ This is a fork of the popular [donnemartin/system-design-primer](donnemartin/sys
 I created this fork to better organize the original content and to be able to publish it in a more reader-friendly format.
 
 Find here the formatted primer:
-https://jordigarcl-system-design-primer.app/
+https://jordigarcl-system-design-primer.netlify.app/
