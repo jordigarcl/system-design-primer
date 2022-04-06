@@ -12,6 +12,10 @@ nav:
 markdown_extensions:
     - toc:
         permalink: true
+    - attr_list
+    - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
 repo_url: https://github.com/jordigarcl/system-design-primer
 repo_name: jordigarcl/system-design-primer
 edit_uri: edit/master/docs/
